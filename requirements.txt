@@ -1,0 +1,3 @@
+openai-whisper>=20231117
+tkinterdnd2>=0.3.0
+mutagen>=1.47.0
