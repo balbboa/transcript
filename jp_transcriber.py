@@ -524,23 +524,68 @@ def transcribe_audio(audio_path, output_prefix="output", model_size="medium",
         
         model = whisper.load_model(model_size)
         
-        # Check and log GPU availability
+        # Check and log GPU availability with detailed diagnostics
         try:
             import torch
             if torch.cuda.is_available():
                 gpu_name = torch.cuda.get_device_name(0)
                 cuda_version = torch.version.cuda
+                gpu_count = torch.cuda.device_count()
                 if log_widget:
                     log(log_widget, f"✓ GPU detected: {gpu_name} (CUDA {cuda_version})", root)
+                    log(log_widget, f"✓ GPU count: {gpu_count}", root)
             else:
+                # Provide detailed diagnostics for why GPU is not available
+                diagnostics = []
+                
+                # Check if PyTorch was built with CUDA support
+                pytorch_cuda = getattr(torch.version, 'cuda', None)
+                if not pytorch_cuda:
+                    diagnostics.append("PyTorch was installed without CUDA support (CPU-only build)")
+                else:
+                    diagnostics.append(f"PyTorch CUDA build version: {pytorch_cuda}")
+                
+                # Check if nvidia-smi is available (driver check)
+                try:
+                    import subprocess
+                    nvidia_smi = subprocess.run(['nvidia-smi'], capture_output=True, timeout=5)
+                    if nvidia_smi.returncode == 0:
+                        diagnostics.append("NVIDIA driver is installed (nvidia-smi works)")
+                        # Try to extract CUDA version from nvidia-smi
+                        output = nvidia_smi.stdout.decode('utf-8', errors='ignore')
+                        import re
+                        match = re.search(r'CUDA Version:\s*(\d+\.\d+)', output)
+                        if match:
+                            driver_cuda = match.group(1)
+                            diagnostics.append(f"Driver CUDA version: {driver_cuda}")
+                            if pytorch_cuda:
+                                if driver_cuda != pytorch_cuda:
+                                    diagnostics.append(f"⚠ Version mismatch: Driver CUDA {driver_cuda} vs PyTorch CUDA {pytorch_cuda}")
+                    else:
+                        diagnostics.append("⚠ nvidia-smi not working (driver issue?)")
+                except (FileNotFoundError, subprocess.TimeoutExpired, Exception):
+                    diagnostics.append("⚠ nvidia-smi not found (NVIDIA driver may not be installed)")
+                
+                # Check environment variables
+                if 'CUDA_PATH' in os.environ:
+                    diagnostics.append(f"CUDA_PATH: {os.environ['CUDA_PATH']}")
+                else:
+                    diagnostics.append("CUDA_PATH environment variable not set")
+                
                 if log_widget:
-                    log(log_widget, "⚠ Using CPU (GPU not available - install PyTorch with CUDA for faster processing)", root)
+                    log(log_widget, "⚠ Using CPU (GPU not available)", root)
+                    log(log_widget, "Diagnostics:", root)
+                    for diag in diagnostics:
+                        log(log_widget, f"  - {diag}", root)
+                    log(log_widget, "To fix: Run 'python setup_gpu.py' or install PyTorch with CUDA support", root)
         except ImportError:
             if log_widget:
                 log(log_widget, "⚠ PyTorch not found - using default device", root)
         except Exception as e:
-            # Silently ignore GPU detection errors
-            pass
+            # Log the actual error for debugging
+            if log_widget:
+                log(log_widget, f"⚠ GPU detection error: {e}", root)
+                log(log_widget, "Falling back to CPU mode", root)
         
         # Estimate model loading work (small portion)
         model_loading_work = audio_duration * 0.05

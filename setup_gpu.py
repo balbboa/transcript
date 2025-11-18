@@ -93,29 +93,71 @@ def install_pytorch(cuda_version=None):
         return False
 
 def verify_installation():
-    """Verify PyTorch and CUDA installation"""
+    """Verify PyTorch and CUDA installation with detailed diagnostics"""
     print("\n🔍 Verifying installation...")
     try:
         import torch
         print(f"✓ PyTorch version: {torch.__version__}")
         
+        # Check PyTorch CUDA build
+        pytorch_cuda = getattr(torch.version, 'cuda', None)
+        if pytorch_cuda:
+            print(f"✓ PyTorch CUDA build version: {pytorch_cuda}")
+        else:
+            print("⚠ PyTorch was installed without CUDA support (CPU-only)")
+            print("  This means GPU acceleration will not work!")
+            return False
+        
         if torch.cuda.is_available():
             print(f"✓ CUDA available: {torch.version.cuda}")
             print(f"✓ GPU: {torch.cuda.get_device_name(0)}")
             print(f"✓ GPU count: {torch.cuda.device_count()}")
+            
+            # Check for version mismatches
+            try:
+                import subprocess
+                nvidia_smi = subprocess.run(['nvidia-smi'], capture_output=True, timeout=5)
+                if nvidia_smi.returncode == 0:
+                    output = nvidia_smi.stdout.decode('utf-8', errors='ignore')
+                    match = re.search(r'CUDA Version:\s*(\d+\.\d+)', output)
+                    if match:
+                        driver_cuda = match.group(1)
+                        print(f"✓ Driver CUDA version: {driver_cuda}")
+                        if driver_cuda != pytorch_cuda:
+                            print(f"⚠ Note: Driver CUDA {driver_cuda} differs from PyTorch CUDA {pytorch_cuda}")
+                            print("  This is usually fine - PyTorch CUDA is backward compatible")
+            except Exception:
+                pass
+            
             return True
         else:
-            print("⚠ CUDA not available (CPU mode)")
-            print("  This might mean:")
-            print("  - PyTorch was installed without CUDA support")
-            print("  - CUDA drivers are not properly installed")
-            print("  - GPU is not compatible")
+            print("❌ CUDA not available despite PyTorch CUDA build")
+            print("  Possible causes:")
+            print("  - CUDA runtime libraries not in PATH/LD_LIBRARY_PATH")
+            print("  - CUDA driver version too old for PyTorch CUDA version")
+            print("  - GPU not compatible or not properly initialized")
+            
+            # Check nvidia-smi
+            try:
+                import subprocess
+                nvidia_smi = subprocess.run(['nvidia-smi'], capture_output=True, timeout=5)
+                if nvidia_smi.returncode == 0:
+                    print("  ✓ nvidia-smi works (driver is installed)")
+                else:
+                    print("  ⚠ nvidia-smi failed (driver issue?)")
+            except FileNotFoundError:
+                print("  ⚠ nvidia-smi not found (driver not installed?)")
+            except Exception as e:
+                print(f"  ⚠ Error checking nvidia-smi: {e}")
+            
             return False
     except ImportError:
         print("❌ PyTorch not found!")
         return False
     except Exception as e:
         print(f"❌ Error verifying installation: {e}")
+        import traceback
+        traceback.print_exc()
         return False
 
 def install_requirements():
